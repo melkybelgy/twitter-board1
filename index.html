@@ -45,9 +45,7 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
 @media (pointer:coarse){button{min-height:42px}.sw{width:36px;height:36px}}
 @media (max-width:600px){body{padding:10px}.bar{gap:6px}#stage{max-height:60vh}#gate .card{padding:16px}}
 @supports (height:1dvh){#stage{max-height:75dvh}@media (max-width:600px){#stage{max-height:60dvh}}}
-
 #mascot{position:fixed;left:0;top:0;width:min(192px,30vw);height:auto;z-index:-1;pointer-events:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;will-change:transform;visibility:hidden}
-.rule{display:inline-block;margin:0 0 14px;padding:6px 12px;border-radius:8px;background:rgba(0,0,0,.4);color:#fff;font-size:15px;text-shadow:0 1px 6px rgba(0,0,0,.6)}
 </style>
 </head>
 <body>
@@ -63,8 +61,7 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
 
 <div class="wrap">
   <h1>Draw on the banner</h1>
-  <p class="sub">Yellow schajtes please draw me sum for my banner for twitter!! i made this website just for it lol</p>
-  <p class="rule">pls dont destroy others art try to draw around it</p>
+  <p class="sub">A shared pixel-art Twitter banner (300 × 100 pixels). Join with your name, click to place one pixel, and climb the leaderboard.</p>
 
   <div class="bar card"><span id="status">Loading…</span><span id="note" class="warn"></span></div>
 
@@ -74,7 +71,7 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
     </div>
     <div class="card" id="tools" style="display:none;gap:6px;align-items:center;flex-wrap:wrap">
       <span id="sws" style="display:flex;gap:6px"></span><button id="eraser">Eraser</button>
-      <label style="display:flex;align-items:center;gap:6px;line-height:1.2">Size <input type="range" id="sz" min="1" max="15" value="1" style="width:110px;accent-color:var(--acc)"><span id="szl" style="min-width:42px;font-variant-numeric:tabular-nums">1×1</span></label>
+      <input type="color" id="cp" value="#111111" title="Pick any color" aria-label="Pick any color" style="width:44px;height:36px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;cursor:pointer"><input type="text" id="hx" value="#111111" maxlength="7" placeholder="#rrggbb" aria-label="Hex color" style="width:96px">
     </div>
     <button id="dl">Download PNG</button>
   </div>
@@ -83,7 +80,7 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
 
   <div class="card" id="board" style="margin-top:12px"><strong>Leaderboard</strong><ol id="rank"></ol></div>
 
-  <div class="bar card" id="hostrow"><button id="hostbtn">Host login</button><span id="hostform" class="hide"><input type="text" id="hem" placeholder="Host email" autocomplete="username" style="max-width:210px"> <input type="password" id="hpw" placeholder="Host password" autocomplete="current-password"> <button class="p" id="hgo">Unlock</button></span><span id="hmsg" class="warn"></span></div>
+  <div class="bar card" id="hostrow"><button id="hostbtn">Host login</button><span id="hostform" class="hide"><input type="password" id="hpw" placeholder="Host password"> <button class="p" id="hgo">Unlock</button></span><span id="hmsg" class="warn"></span></div>
 
   <div class="bar card hide" id="admin">
     <strong>Host controls</strong>
@@ -99,24 +96,19 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
 <script>
 (function(){
 var DB='https://pixelbanner-default-rtdb.firebaseio.com';
-var API_KEY='AIzaSyBbZ_Sd0ZY0LLxIinkvNsCV5lPeZ1XeZ8U';
+var HASH='a2774f8d3d61e65dd9ea5946a5cddb72fd3bf3998ffe8c59b4d5d8cc7ae90b2a';
 var $=function(i){return document.getElementById(i)};
 var cv=$('cv'),ctx=cv.getContext('2d'),stage=$('stage'),statusEl=$('status'),noteEl=$('note');
 var colors=['#111111','#e63946','#f4a261','#f9c74f','#2a9d8f','#1d9bf0','#7b2cbf','#ff6fb5','#ffffff'];
-var CS=10,color=colors[0],erase=false,endsAt=null,canDraw=true,joined=false,loaded=false,zoom=1;
+var CS=5,color=colors[0],erase=false,endsAt=null,canDraw=true,joined=false,loaded=false,zoom=1;
 var pix={},players={},uid=null,hostOn=false,armedUid=null,armT2=null;
 try{uid=localStorage.getItem('uid')}catch(e){}
 if(!uid){uid='u'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);try{localStorage.setItem('uid',uid)}catch(e){}}
 
 // ---- Firebase Realtime Database over plain HTTPS (no SDK, no sign-in)
-function api(path,method,body,auth){
-  function go(tok){
-    var ctl=window.AbortController?new AbortController():null,t=ctl?setTimeout(function(){ctl.abort()},15000):null;
-    return fetch(DB+path+'.json'+(tok?'?auth='+encodeURIComponent(tok):''),{method:method||'GET',body:body===undefined?undefined:JSON.stringify(body),signal:ctl?ctl.signal:undefined})
-      .then(function(r){clearTimeout(t);if(!r.ok)throw new Error('HTTP '+r.status);return r.json()},
-            function(er){clearTimeout(t);throw new Error(er&&er.name==='AbortError'?'timed out':'request blocked or offline')});
-  }
-  return auth?getToken().then(go):go();
+function api(path,method,body){
+  return fetch(DB+path+'.json',{method:method||'GET',body:body===undefined?undefined:JSON.stringify(body)})
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()});
 }
 function setAt(root,path,val){
   var p=path.split('/').filter(Boolean);
@@ -141,7 +133,10 @@ function stream(path,onChange){
 
 // ---- drawing
 function fill(){ctx.fillStyle='#fff';ctx.fillRect(0,0,1500,500)}
-function drawKey(k){var a=k.split('_');ctx.fillStyle=pix[k]||'#fff';ctx.fillRect(a[0]*CS,a[1]*CS,CS,CS)}
+function colorOf(v){return typeof v==='string'?v:(v&&v.c)||null}
+function ownerOf(v){return v&&typeof v==='object'?v.u:null}
+function flash(m){noteEl.textContent=m;setTimeout(function(){if(noteEl.textContent===m)noteEl.textContent=''},3500)}
+function drawKey(k){var a=k.split('_');ctx.fillStyle=colorOf(pix[k])||'#fff';ctx.fillRect(a[0]*CS,a[1]*CS,CS,CS)}
 function redraw(){fill();Object.keys(pix).forEach(drawKey)}
 fill();
 
@@ -161,7 +156,7 @@ function board(){
         armedUid=null;clearTimeout(armT2);
         delete players[r.u];board();
         var id=r.u,am=$('amsg');am.textContent='';
-        api('/players/'+id,'PATCH',{name:null,count:null},true)
+        api('/players/'+id,'PATCH',{name:null,count:null})
           .then(function(){return api('/players/'+id)})
           .then(function(v){if(v&&v.name)am.textContent=' The database kept '+r.n+'. Check the Realtime Database rules.'})
           .catch(function(e){am.textContent=' Couldn’t remove '+r.n+' ('+(e.message||'error')+'). Check the Realtime Database rules.'});
@@ -174,15 +169,25 @@ function board(){
 
 colors.forEach(function(c,i){
   var b=document.createElement('button');b.className='sw'+(i?'':' on');b.style.background=c;b.setAttribute('aria-label',c);
-  b.onclick=function(){color=c;erase=false;[].forEach.call($('sws').children,function(x){x.classList.remove('on')});b.classList.add('on');$('eraser').classList.remove('p')};
+  b.dataset.c=c;b.onclick=function(){applyColor(c,true)};
   $('sws').appendChild(b);
 });
 $('eraser').onclick=function(){erase=!erase;$('eraser').classList.toggle('p',erase)};
-$('sz').oninput=function(){brush=Math.max(1,Math.min(15,+this.value||1));$('szl').textContent=brush+'×'+brush};
+function applyColor(c,fromSwatch){
+  c=c.toLowerCase();color=c;erase=false;$('eraser').classList.remove('p');
+  [].forEach.call($('sws').children,function(x){x.classList.toggle('on',x.dataset.c===c)});
+  $('cp').value=c;if(fromSwatch||document.activeElement!==$('hx'))$('hx').value=c;
+}
+$('cp').oninput=function(){applyColor($('cp').value)};
+$('hx').oninput=function(){
+  var v=$('hx').value.trim();if(v[0]!=='#')v='#'+v;
+  if(/^#[0-9a-f]{3}$/i.test(v))v='#'+v[1]+v[1]+v[2]+v[2]+v[3]+v[3];
+  if(/^#[0-9a-f]{6}$/i.test(v))applyColor(v);
+};
 
 // ---- zoom & pan
 function setZoom(z,cx,cy){
-  z=Math.max(1,Math.min(12,z));
+  z=Math.max(1,Math.min(20,z));
   var sr=stage.getBoundingClientRect();if(cx==null){cx=sr.left+sr.width/2;cy=sr.top+sr.height/2}
   var r=cv.getBoundingClientRect(),fx=(cx-r.left)/r.width,fy=(cy-r.top)/r.height;
   zoom=z;cv.style.width=(z*100)+'%';$('zl').textContent=Math.round(z*100)+'%';
@@ -194,23 +199,25 @@ $('zo').onclick=function(){setZoom(zoom/1.5)};
 $('zr').onclick=function(){setZoom(1)};
 stage.addEventListener('wheel',function(e){e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*(e.ctrlKey?0.01:0.0015)),e.clientX,e.clientY)},{passive:false});
 
-function pos(e){var r=cv.getBoundingClientRect();return[Math.max(0,Math.min(149,Math.floor((e.clientX-r.left)*150/r.width))),Math.max(0,Math.min(49,Math.floor((e.clientY-r.top)*50/r.height)))]}
-var brush=1;
+function pos(e){var r=cv.getBoundingClientRect();return[Math.max(0,Math.min(299,Math.floor((e.clientX-r.left)*300/r.width))),Math.max(0,Math.min(99,Math.floor((e.clientY-r.top)*100/r.height)))]}
 function place(q){
   if(!joined||!canDraw||!loaded)return;
+  var k=q[0]+'_'+q[1],cur=pix[k],cc=colorOf(cur),W='#ffffff';
   var bad=function(){noteEl.textContent=' Couldn’t save that pixel. Check your connection.'};
-  var off=Math.floor((brush-1)/2),upd={},n=0;
-  for(var dx=0;dx<brush;dx++)for(var dy=0;dy<brush;dy++){
-    var X=q[0]-off+dx,Y=q[1]-off+dy;
-    if(X<0||X>149||Y<0||Y>49)continue;
-    var k=X+'_'+Y;
-    if(erase){if(!pix[k])continue;delete pix[k];upd[k]=null}
-    else{if(pix[k]===color)continue;pix[k]=color;upd[k]=color}
-    drawKey(k);n++;
+  var cnt=function(n){api('/players/'+uid+'/count','PUT',{'.sv':{increment:n}}).catch(function(){})};
+  if(erase){
+    if(!cur)return;
+    if(ownerOf(cur)!==uid){flash(' You can only erase your own pixels.');return}
+    delete pix[k];drawKey(k);
+    api('/pixels/'+k,'DELETE').catch(bad);
+    if(cc!==W)cnt(-1);
+    return;
   }
-  if(!n)return;
-  api('/pixels','PATCH',upd).catch(bad);
-  if(!erase)api('/players/'+uid+'/count','PUT',{'.sv':{increment:n}}).catch(function(){});
+  if(cur&&cc!==W){flash(' That pixel is already taken. Use the eraser on your own pixels.');return}
+  if(cc===color)return;
+  var v={c:color,u:uid};pix[k]=v;drawKey(k);
+  api('/pixels/'+k,'PUT',v).catch(bad);
+  if(color!==W)cnt(1);
 }
 var dn=null,ptrs={},pinch=null;
 function pts(){return Object.keys(ptrs).map(function(k){return ptrs[k]})}
@@ -266,13 +273,7 @@ function enter(){joined=true;$('gate').classList.add('hide');$('tools').style.di
 $('join').onclick=function(){
   var n=$('nm').value.trim().slice(0,20);
   if(!n){$('gmsg').textContent='Please enter a name.';return}
-  $('gmsg').textContent='Joining…';
-  api('/players/'+uid,'PATCH',{name:n}).then(function(){
-    if(!joined){players[uid]=Object.assign({},players[uid],{name:n});enter();board()}
-  }).catch(function(e){
-    var m=e&&e.message||'error';
-    $('gmsg').textContent='Couldn’t join ('+m+').'+(m.indexOf('HTTP 401')===0?' The database rules are blocking it.':' Something may be blocking firebaseio.com (VPN, ad blocker, antivirus). Try a private window.');
-  });
+  api('/players/'+uid,'PATCH',{name:n}).catch(function(){$('gmsg').textContent='Couldn’t join. Check your connection and try again.'});
 };
 $('nm').addEventListener('keydown',function(e){if(e.key==='Enter')$('join').click()});
 $('watch').onclick=function(){$('gate').classList.add('hide')};
@@ -297,36 +298,21 @@ stream('/config',function(t,keys,err){
   endsAt=t&&t.endsAt!=null?t.endsAt:null;tick();
 });
 
-// ---- host controls (Firebase email + password sign-in)
-var idTok=null,tokExp=0,refTok=null;
-try{refTok=sessionStorage.getItem('hrt')}catch(e){}
-function setTok(idt,rt,secs){idTok=idt;tokExp=Date.now()+(+secs||3600)*1000;if(rt){refTok=rt;try{sessionStorage.setItem('hrt',rt)}catch(e){}}}
-function jsonOrErr(r){return r.json().then(function(j){if(!r.ok)throw new Error((j.error&&(j.error.message||j.error))||'error');return j})}
-function getToken(){
-  if(idTok&&tokExp-Date.now()>60000)return Promise.resolve(idTok);
-  if(!refTok)return Promise.reject(new Error('Host is signed out'));
-  return fetch('https://securetoken.googleapis.com/v1/token?key='+API_KEY,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=refresh_token&refresh_token='+encodeURIComponent(refTok)})
-    .then(jsonOrErr).then(function(j){setTok(j.id_token,j.refresh_token,j.expires_in);return idTok});
-}
+// ---- host controls (password)
+async function sha(s){var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return Array.from(new Uint8Array(b)).map(function(x){return ('0'+x.toString(16)).slice(-2)}).join('')}
 function showAdmin(on){hostOn=on;$('admin').classList.toggle('hide',!on);$('hostrow').classList.toggle('hide',on);board()}
-function dropSession(){idTok=null;refTok=null;tokExp=0;try{sessionStorage.removeItem('hrt')}catch(e){}}
-$('hostbtn').onclick=function(){$('hostform').classList.toggle('hide');$('hem').focus()};
-$('hgo').onclick=function(){
-  var em=$('hem').value.trim(),pw=$('hpw').value,msg=$('hmsg');
-  if(API_KEY.indexOf('PASTE')===0){msg.textContent=' Add your Firebase Web API key to the page first.';return}
-  if(!em||!pw){msg.textContent=' Enter the host email and password.';return}
-  msg.textContent=' Signing in…';
-  fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='+API_KEY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:em,password:pw,returnSecureToken:true})})
-    .then(jsonOrErr)
-    .then(function(j){setTok(j.idToken,j.refreshToken,j.expiresIn);$('hpw').value='';msg.textContent='';showAdmin(true)})
-    .catch(function(e){msg.textContent=' Couldn’t sign in ('+e.message+').'});
+$('hostbtn').onclick=function(){$('hostform').classList.toggle('hide');$('hpw').focus()};
+$('hgo').onclick=async function(){
+  try{var h=await sha($('hpw').value);
+    if(h===HASH){showAdmin(true);$('hpw').value='';$('hmsg').textContent='';try{sessionStorage.setItem('hh',h)}catch(e){}}
+    else $('hmsg').textContent=' Wrong password.';
+  }catch(e){$('hmsg').textContent=' Couldn’t check the password here.'}
 };
 $('hpw').addEventListener('keydown',function(e){if(e.key==='Enter')$('hgo').click()});
-$('hem').addEventListener('keydown',function(e){if(e.key==='Enter')$('hgo').click()});
-$('hout').onclick=function(){dropSession();showAdmin(false)};
-if(refTok&&API_KEY.indexOf('PASTE')!==0)getToken().then(function(){showAdmin(true)}).catch(dropSession);
+$('hout').onclick=function(){showAdmin(false);try{sessionStorage.removeItem('hh')}catch(e){}};
+try{if(sessionStorage.getItem('hh')===HASH)showAdmin(true)}catch(e){}
 
-function setEnd(v){api('/config','PUT',v===null?null:{endsAt:v},true).catch(function(){noteEl.textContent=' Couldn’t update the timer.'})}
+function setEnd(v){api('/config','PUT',v===null?null:{endsAt:v}).catch(function(){noteEl.textContent=' Couldn’t update the timer.'})}
 $('start').onclick=function(){var m=Math.max(1,+$('mins').value||10);setEnd(Date.now()+m*60000)};
 $('lock').onclick=function(){setEnd(1)};
 $('open').onclick=function(){setEnd(null)};
@@ -336,9 +322,9 @@ $('clear').onclick=async function(){
   if(!armed){armed=true;b.textContent='Tap again to erase everything';b.classList.add('p');armT=setTimeout(function(){armed=false;b.textContent='Clear banner';b.classList.remove('p')},4000);return}
   clearTimeout(armT);armed=false;b.textContent='Clearing…';
   try{
-    await api('/pixels','DELETE',undefined,true);
+    await api('/pixels','DELETE');
     var upd={};Object.keys(players).forEach(function(u){upd[u+'/count']=0});
-    if(Object.keys(upd).length)await api('/players','PATCH',upd,true);
+    if(Object.keys(upd).length)await api('/players','PATCH',upd);
     noteEl.textContent='';
   }catch(e){noteEl.textContent=' Couldn’t clear the banner: '+(e.message||'error')+'.'}
   b.textContent='Clear banner';b.classList.remove('p');
