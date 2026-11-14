@@ -46,6 +46,7 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
 @media (max-width:600px){body{padding:10px}.bar{gap:6px}#stage{max-height:60vh}#gate .card{padding:16px}}
 @supports (height:1dvh){#stage{max-height:75dvh}@media (max-width:600px){#stage{max-height:60dvh}}}
 #mascot{position:fixed;left:0;top:0;width:min(192px,30vw);height:auto;z-index:-1;pointer-events:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;will-change:transform;visibility:hidden}
+.rule{display:inline-block;margin:0 0 14px;padding:6px 12px;border-radius:8px;background:rgba(0,0,0,.4);color:#fff;font-size:15px;text-shadow:0 1px 6px rgba(0,0,0,.6)}
 </style>
 </head>
 <body>
@@ -61,7 +62,8 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
 
 <div class="wrap">
   <h1>Draw on the banner</h1>
-  <p class="sub">A shared pixel-art Twitter banner (300 × 100 pixels). Join with your name, click to place one pixel, and climb the leaderboard.</p>
+  <p class="sub">Yellow schajtes please draw me sum for my banner for twitter!! i made this website just for it lol</p>
+  <p class="rule">pls dont destroy others art try to draw around it</p>
 
   <div class="bar card"><span id="status">Loading…</span><span id="note" class="warn"></span></div>
 
@@ -80,7 +82,7 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
 
   <div class="card" id="board" style="margin-top:12px"><strong>Leaderboard</strong><ol id="rank"></ol></div>
 
-  <div class="bar card" id="hostrow"><button id="hostbtn">Host login</button><span id="hostform" class="hide"><input type="password" id="hpw" placeholder="Host password"> <button class="p" id="hgo">Unlock</button></span><span id="hmsg" class="warn"></span></div>
+  <div class="bar card" id="hostrow"><button id="hostbtn">Host login</button><span id="hostform" class="hide"><input type="text" id="hem" placeholder="Host email" autocomplete="username" style="max-width:210px"> <input type="password" id="hpw" placeholder="Host password" autocomplete="current-password"> <button class="p" id="hgo">Unlock</button></span><span id="hmsg" class="warn"></span></div>
 
   <div class="bar card hide" id="admin">
     <strong>Host controls</strong>
@@ -89,6 +91,7 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
     <button id="lock">Lock now</button>
     <button id="open">No time limit</button>
     <button id="clear">Clear banner</button>
+    <button id="upg">Upgrade old art</button>
     <button id="hout">Lock host controls</button>
     <span id="amsg" class="warn"></span>
   </div>
@@ -96,7 +99,7 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
 <script>
 (function(){
 var DB='https://pixelbanner-default-rtdb.firebaseio.com';
-var HASH='a2774f8d3d61e65dd9ea5946a5cddb72fd3bf3998ffe8c59b4d5d8cc7ae90b2a';
+var API_KEY='AIzaSyBbZ_Sd0ZY0LLxIinkvNsCV5lPeZ1XeZ8U';
 var $=function(i){return document.getElementById(i)};
 var cv=$('cv'),ctx=cv.getContext('2d'),stage=$('stage'),statusEl=$('status'),noteEl=$('note');
 var colors=['#111111','#e63946','#f4a261','#f9c74f','#2a9d8f','#1d9bf0','#7b2cbf','#ff6fb5','#ffffff'];
@@ -106,9 +109,14 @@ try{uid=localStorage.getItem('uid')}catch(e){}
 if(!uid){uid='u'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);try{localStorage.setItem('uid',uid)}catch(e){}}
 
 // ---- Firebase Realtime Database over plain HTTPS (no SDK, no sign-in)
-function api(path,method,body){
-  return fetch(DB+path+'.json',{method:method||'GET',body:body===undefined?undefined:JSON.stringify(body)})
-    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()});
+function api(path,method,body,auth){
+  function go(tok){
+    var ctl=window.AbortController?new AbortController():null,t=ctl?setTimeout(function(){ctl.abort()},15000):null;
+    return fetch(DB+path+'.json'+(tok?'?auth='+encodeURIComponent(tok):''),{method:method||'GET',body:body===undefined?undefined:JSON.stringify(body),signal:ctl?ctl.signal:undefined})
+      .then(function(r){clearTimeout(t);if(!r.ok)throw new Error('HTTP '+r.status);return r.json()},
+            function(er){clearTimeout(t);throw new Error(er&&er.name==='AbortError'?'timed out':'request blocked or offline')});
+  }
+  return auth?getToken().then(go):go();
 }
 function setAt(root,path,val){
   var p=path.split('/').filter(Boolean);
@@ -156,7 +164,7 @@ function board(){
         armedUid=null;clearTimeout(armT2);
         delete players[r.u];board();
         var id=r.u,am=$('amsg');am.textContent='';
-        api('/players/'+id,'PATCH',{name:null,count:null})
+        api('/players/'+id,'PATCH',{name:null,count:null},true)
           .then(function(){return api('/players/'+id)})
           .then(function(v){if(v&&v.name)am.textContent=' The database kept '+r.n+'. Check the Realtime Database rules.'})
           .catch(function(e){am.textContent=' Couldn’t remove '+r.n+' ('+(e.message||'error')+'). Check the Realtime Database rules.'});
@@ -299,20 +307,35 @@ stream('/config',function(t,keys,err){
 });
 
 // ---- host controls (password)
-async function sha(s){var b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return Array.from(new Uint8Array(b)).map(function(x){return ('0'+x.toString(16)).slice(-2)}).join('')}
+var idTok=null,tokExp=0,refTok=null;
+try{refTok=sessionStorage.getItem('hrt')}catch(e){}
+function setTok(idt,rt,secs){idTok=idt;tokExp=Date.now()+(+secs||3600)*1000;if(rt){refTok=rt;try{sessionStorage.setItem('hrt',rt)}catch(e){}}}
+function jsonOrErr(r){return r.json().then(function(j){if(!r.ok)throw new Error((j.error&&(j.error.message||j.error))||'error');return j})}
+function getToken(){
+  if(idTok&&tokExp-Date.now()>60000)return Promise.resolve(idTok);
+  if(!refTok)return Promise.reject(new Error('Host is signed out'));
+  return fetch('https://securetoken.googleapis.com/v1/token?key='+API_KEY,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'grant_type=refresh_token&refresh_token='+encodeURIComponent(refTok)})
+    .then(jsonOrErr).then(function(j){setTok(j.id_token,j.refresh_token,j.expires_in);return idTok});
+}
 function showAdmin(on){hostOn=on;$('admin').classList.toggle('hide',!on);$('hostrow').classList.toggle('hide',on);board()}
-$('hostbtn').onclick=function(){$('hostform').classList.toggle('hide');$('hpw').focus()};
-$('hgo').onclick=async function(){
-  try{var h=await sha($('hpw').value);
-    if(h===HASH){showAdmin(true);$('hpw').value='';$('hmsg').textContent='';try{sessionStorage.setItem('hh',h)}catch(e){}}
-    else $('hmsg').textContent=' Wrong password.';
-  }catch(e){$('hmsg').textContent=' Couldn’t check the password here.'}
+function dropSession(){idTok=null;refTok=null;tokExp=0;try{sessionStorage.removeItem('hrt')}catch(e){}}
+$('hostbtn').onclick=function(){$('hostform').classList.toggle('hide');$('hem').focus()};
+$('hgo').onclick=function(){
+  var em=$('hem').value.trim(),pw=$('hpw').value,msg=$('hmsg');
+  if(API_KEY.indexOf('PASTE')===0){msg.textContent=' Add your Firebase Web API key to the page first.';return}
+  if(!em||!pw){msg.textContent=' Enter the host email and password.';return}
+  msg.textContent=' Signing in…';
+  fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key='+API_KEY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:em,password:pw,returnSecureToken:true})})
+    .then(jsonOrErr)
+    .then(function(j){setTok(j.idToken,j.refreshToken,j.expiresIn);$('hpw').value='';msg.textContent='';showAdmin(true)})
+    .catch(function(e){msg.textContent=' Couldn’t sign in ('+e.message+').'});
 };
 $('hpw').addEventListener('keydown',function(e){if(e.key==='Enter')$('hgo').click()});
-$('hout').onclick=function(){showAdmin(false);try{sessionStorage.removeItem('hh')}catch(e){}};
-try{if(sessionStorage.getItem('hh')===HASH)showAdmin(true)}catch(e){}
+$('hem').addEventListener('keydown',function(e){if(e.key==='Enter')$('hgo').click()});
+$('hout').onclick=function(){dropSession();showAdmin(false)};
+if(refTok&&API_KEY.indexOf('PASTE')!==0)getToken().then(function(){showAdmin(true)}).catch(dropSession);
 
-function setEnd(v){api('/config','PUT',v===null?null:{endsAt:v}).catch(function(){noteEl.textContent=' Couldn’t update the timer.'})}
+function setEnd(v){api('/config','PUT',v===null?null:{endsAt:v},true).catch(function(){noteEl.textContent=' Couldn’t update the timer.'})}
 $('start').onclick=function(){var m=Math.max(1,+$('mins').value||10);setEnd(Date.now()+m*60000)};
 $('lock').onclick=function(){setEnd(1)};
 $('open').onclick=function(){setEnd(null)};
@@ -322,12 +345,31 @@ $('clear').onclick=async function(){
   if(!armed){armed=true;b.textContent='Tap again to erase everything';b.classList.add('p');armT=setTimeout(function(){armed=false;b.textContent='Clear banner';b.classList.remove('p')},4000);return}
   clearTimeout(armT);armed=false;b.textContent='Clearing…';
   try{
-    await api('/pixels','DELETE');
+    await api('/pixels','DELETE',undefined,true);
     var upd={};Object.keys(players).forEach(function(u){upd[u+'/count']=0});
-    if(Object.keys(upd).length)await api('/players','PATCH',upd);
+    if(Object.keys(upd).length)await api('/players','PATCH',upd,true);
     noteEl.textContent='';
   }catch(e){noteEl.textContent=' Couldn’t clear the banner: '+(e.message||'error')+'.'}
   b.textContent='Clear banner';b.classList.remove('p');
+};
+
+var upArmed=false,upT=null;
+$('upg').onclick=async function(){
+  var b=$('upg'),am=$('amsg');
+  var olds=Object.keys(pix).filter(function(k){return typeof pix[k]==='string'});
+  if(!olds.length){am.textContent=' Nothing to upgrade.';return}
+  if(!upArmed){upArmed=true;b.textContent='Tap again to upgrade';b.classList.add('p');upT=setTimeout(function(){upArmed=false;b.textContent='Upgrade old art';b.classList.remove('p')},5000);return}
+  clearTimeout(upT);upArmed=false;b.textContent='Upgrading…';am.textContent='';
+  var out={};
+  olds.forEach(function(k){
+    var v=pix[k].toLowerCase();if(v==='#ffffff')return;
+    var a=k.split('_'),x=a[0]*2,y=a[1]*2,o={c:v,u:'legacy'};
+    [[0,0],[1,0],[0,1],[1,1]].forEach(function(d){out[(x+d[0])+'_'+(y+d[1])]=o});
+  });
+  Object.keys(pix).forEach(function(k){if(typeof pix[k]==='object')out[k]=pix[k]});
+  try{await api('/pixels','PUT',out,true);am.textContent=' Old art upgraded.'}
+  catch(e){am.textContent=' Upgrade failed ('+e.message+').'}
+  b.textContent='Upgrade old art';b.classList.remove('p');
 };
 })();
 </script>
