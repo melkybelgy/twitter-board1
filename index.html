@@ -47,6 +47,12 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
 @supports (height:1dvh){#stage{max-height:75dvh}@media (max-width:600px){#stage{max-height:60dvh}}}
 #mascot{position:fixed;left:0;top:0;width:min(192px,30vw);height:auto;z-index:-1;pointer-events:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;will-change:transform;visibility:hidden}
 .rule{display:inline-block;margin:0 0 14px;padding:6px 12px;border-radius:8px;background:rgba(0,0,0,.4);color:#fff;font-size:15px;text-shadow:0 1px 6px rgba(0,0,0,.6)}
+#sw{position:relative}
+#ov{position:absolute;pointer-events:none;z-index:1;aspect-ratio:auto;image-rendering:auto;cursor:default}
+canvas.picking{cursor:copy}
+.sizebox{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.sizebox input[type=range]{width:110px}
+#bl{min-width:44px;font-variant-numeric:tabular-nums}
 </style>
 </head>
 <body>
@@ -72,13 +78,13 @@ canvas{-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-sel
       <button id="zo" aria-label="Zoom out">−</button><span id="zl" style="min-width:48px;text-align:center">100%</span><button id="zi" aria-label="Zoom in">+</button><button id="zr">Fit</button>
     </div>
     <div class="card" id="tools" style="display:none;gap:6px;align-items:center;flex-wrap:wrap">
-      <span id="sws" style="display:flex;gap:6px"></span><button id="eraser">Eraser</button>
-      <input type="color" id="cp" value="#111111" title="Pick any color" aria-label="Pick any color" style="width:44px;height:36px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;cursor:pointer"><input type="text" id="hx" value="#111111" maxlength="7" placeholder="#rrggbb" aria-label="Hex color" style="width:96px">
+      <span id="sws" style="display:flex;gap:6px"></span><button id="eraser">Eraser</button><button id="pick" title="Tap a pixel to copy its color (Alt-click also works)">Picker</button>
+      <input type="color" id="cp" value="#111111" title="Pick any color" aria-label="Pick any color" style="width:44px;height:36px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;cursor:pointer"><input type="text" id="hx" value="#111111" maxlength="7" placeholder="#rrggbb" aria-label="Hex color" style="width:96px"><label class="sizebox">Size <input type="range" id="bs" min="1" max="15" value="1" aria-label="Brush size"><span id="bl">1×1</span></label><button id="gridbtn" class="p" title="Show or hide the grid">Grid</button>
     </div>
     <button id="dl">Download PNG</button>
   </div>
 
-  <div id="stage"><canvas id="cv" width="1500" height="500"></canvas></div>
+  <div id="sw"><div id="stage"><canvas id="cv" width="1500" height="500"></canvas></div><canvas id="ov"></canvas></div>
 
   <div class="card" id="board" style="margin-top:12px"><strong>Leaderboard</strong><ol id="rank"></ol></div>
 
@@ -104,6 +110,7 @@ var $=function(i){return document.getElementById(i)};
 var cv=$('cv'),ctx=cv.getContext('2d'),stage=$('stage'),statusEl=$('status'),noteEl=$('note');
 var colors=['#111111','#e63946','#f4a261','#f9c74f','#2a9d8f','#1d9bf0','#7b2cbf','#ff6fb5','#ffffff'];
 var CS=5,color=colors[0],erase=false,endsAt=null,canDraw=true,joined=false,loaded=false,zoom=1;
+var BS=1,picking=false,gridOn=true,hv=null,ov=$('ov'),ovx=ov.getContext('2d');
 var pix={},players={},uid=null,hostOn=false,armedUid=null,armT2=null;
 try{uid=localStorage.getItem('uid')}catch(e){}
 if(!uid){uid='u'+Math.random().toString(36).slice(2,10)+Date.now().toString(36);try{localStorage.setItem('uid',uid)}catch(e){}}
@@ -180,9 +187,9 @@ colors.forEach(function(c,i){
   b.dataset.c=c;b.onclick=function(){applyColor(c,true)};
   $('sws').appendChild(b);
 });
-$('eraser').onclick=function(){erase=!erase;$('eraser').classList.toggle('p',erase)};
+$('eraser').onclick=function(){erase=!erase;$('eraser').classList.toggle('p',erase);if(erase)setPick(false);sched()};
 function applyColor(c,fromSwatch){
-  c=c.toLowerCase();color=c;erase=false;$('eraser').classList.remove('p');
+  c=c.toLowerCase();color=c;erase=false;$('eraser').classList.remove('p');setPick(false);sched();
   [].forEach.call($('sws').children,function(x){x.classList.toggle('on',x.dataset.c===c)});
   $('cp').value=c;if(fromSwatch||document.activeElement!==$('hx'))$('hx').value=c;
 }
@@ -200,7 +207,7 @@ function setZoom(z,cx,cy){
   var r=cv.getBoundingClientRect(),fx=(cx-r.left)/r.width,fy=(cy-r.top)/r.height;
   zoom=z;cv.style.width=(z*100)+'%';$('zl').textContent=Math.round(z*100)+'%';
   var r2=cv.getBoundingClientRect();
-  stage.scrollLeft+=r2.left+fx*r2.width-cx;stage.scrollTop+=r2.top+fy*r2.height-cy;
+  stage.scrollLeft+=r2.left+fx*r2.width-cx;stage.scrollTop+=r2.top+fy*r2.height-cy;sched();
 }
 $('zi').onclick=function(){setZoom(zoom*1.5)};
 $('zo').onclick=function(){setZoom(zoom/1.5)};
@@ -208,24 +215,33 @@ $('zr').onclick=function(){setZoom(1)};
 stage.addEventListener('wheel',function(e){e.preventDefault();setZoom(zoom*Math.exp(-e.deltaY*(e.ctrlKey?0.01:0.0015)),e.clientX,e.clientY)},{passive:false});
 
 function pos(e){var r=cv.getBoundingClientRect();return[Math.max(0,Math.min(299,Math.floor((e.clientX-r.left)*300/r.width))),Math.max(0,Math.min(99,Math.floor((e.clientY-r.top)*100/r.height)))]}
+function span(q,n){var off=Math.floor((n-1)/2),x0=q[0]-off,y0=q[1]-off;return{x0:Math.max(0,x0),y0:Math.max(0,y0),x1:Math.min(300,x0+n),y1:Math.min(100,y0+n)}}
+function cellKeys(q){var sp=span(q,BS),out=[];for(var y=sp.y0;y<sp.y1;y++)for(var x=sp.x0;x<sp.x1;x++)out.push(x+'_'+y);return out}
 function place(q){
   if(!joined||!canDraw||!loaded)return;
-  var k=q[0]+'_'+q[1],cur=pix[k],cc=colorOf(cur),W='#ffffff';
-  var bad=function(){noteEl.textContent=' Couldn’t save that pixel. Check your connection.'};
-  var cnt=function(n){api('/players/'+uid+'/count','PUT',{'.sv':{increment:n}}).catch(function(){})};
-  if(erase){
-    if(!cur)return;
-    if(ownerOf(cur)!==uid){flash(' You can only erase your own pixels.');return}
-    delete pix[k];drawKey(k);
-    api('/pixels/'+k,'DELETE').catch(bad);
-    if(cc!==W)cnt(-1);
-    return;
+  var W='#ffffff',upd={},keys=[],delta=0,skipped=0;
+  var bad=function(){noteEl.textContent=' Couldn’t save that. Check your connection.'};
+  cellKeys(q).forEach(function(k){
+    var cur=pix[k],cc=colorOf(cur);
+    if(erase){
+      if(!cur)return;
+      if(ownerOf(cur)!==uid){skipped++;return}
+      delete pix[k];drawKey(k);upd[k]=null;keys.push(k);if(cc!==W)delta--;
+      return;
+    }
+    if(cur&&cc!==W){skipped++;return}
+    if(cc===color)return;
+    var v={c:color,u:uid};pix[k]=v;drawKey(k);upd[k]=v;keys.push(k);if(color!==W)delta++;
+  });
+  if(skipped){
+    if(BS===1)flash(erase?' You can only erase your own pixels.':' That pixel is already taken. Use the eraser on your own pixels.');
+    else flash(erase?' Skipped '+skipped+' pixels that aren’t yours.':' Skipped '+skipped+' pixels that were already taken.');
   }
-  if(cur&&cc!==W){flash(' That pixel is already taken. Use the eraser on your own pixels.');return}
-  if(cc===color)return;
-  var v={c:color,u:uid};pix[k]=v;drawKey(k);
-  api('/pixels/'+k,'PUT',v).catch(bad);
-  if(color!==W)cnt(1);
+  if(!keys.length)return;
+  var one=function(k){return upd[k]===null?api('/pixels/'+k,'DELETE'):api('/pixels/'+k,'PUT',upd[k])};
+  var req=keys.length===1?one(keys[0]):api('/pixels','PATCH',upd).catch(function(){return Promise.all(keys.map(one))});
+  req.catch(bad);
+  if(delta)api('/players/'+uid+'/count','PUT',{'.sv':{increment:delta}}).catch(function(){});
 }
 var dn=null,ptrs={},pinch=null;
 function pts(){return Object.keys(ptrs).map(function(k){return ptrs[k]})}
@@ -257,9 +273,65 @@ function lift(e){
   delete ptrs[e.pointerId];pinch=null;
   var a=pts();
   if(a.length===1)dn=base(a[0],true);else if(!a.length)dn=null;
-  if(tap)place(pos(e));
+  if(tap){var q=pos(e);if((picking||e.altKey)&&joined)pickAt(q);else place(q)}
 }
 cv.addEventListener('pointerup',lift);cv.addEventListener('pointercancel',lift);
+
+// ---- color picker, brush size, grid overlay
+function setPick(on){picking=on;$('pick').classList.toggle('p',on);cv.classList.toggle('picking',on)}
+function hex2(n){return (n<16?'0':'')+n.toString(16)}
+function pickAt(q){
+  var d=ctx.getImageData(q[0]*CS+Math.floor(CS/2),q[1]*CS+Math.floor(CS/2),1,1).data;
+  applyColor('#'+hex2(d[0])+hex2(d[1])+hex2(d[2]),true);
+}
+$('pick').onclick=function(){
+  var on=!picking;
+  if(on){erase=false;$('eraser').classList.remove('p')}
+  setPick(on);sched();
+};
+$('bs').oninput=function(){BS=Math.max(1,Math.min(15,+$('bs').value||1));$('bl').textContent=BS+'×'+BS;sched()};
+$('gridbtn').onclick=function(){gridOn=!gridOn;$('gridbtn').classList.toggle('p',gridOn);sched()};
+
+var ovQ=false;
+function sched(){if(ovQ)return;ovQ=true;requestAnimationFrame(function(){ovQ=false;drawOv()})}
+function drawOv(){
+  var dpr=window.devicePixelRatio||1,w=stage.clientWidth,h=stage.clientHeight;
+  var cw=Math.round(w*dpr),ch=Math.round(h*dpr);
+  if(ov.width!==cw||ov.height!==ch){ov.width=cw;ov.height=ch}
+  ov.style.left=(stage.offsetLeft+stage.clientLeft)+'px';ov.style.top=(stage.offsetTop+stage.clientTop)+'px';
+  ov.style.width=w+'px';ov.style.height=h+'px';
+  var g=ovx;g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,w,h);
+  if(!joined)return;
+  var r=cv.getBoundingClientRect(),sr=stage.getBoundingClientRect();
+  var ox=r.left-sr.left-stage.clientLeft,oy=r.top-sr.top-stage.clientTop,s=r.width/300;
+  function sn(v){return (Math.round(v*dpr)+.5)/dpr}
+  if(gridOn&&s>=4){
+    var i0=Math.max(0,Math.floor(-ox/s)),i1=Math.min(300,Math.ceil((w-ox)/s));
+    var j0=Math.max(0,Math.floor(-oy/s)),j1=Math.min(100,Math.ceil((h-oy)/s));
+    var xa=Math.max(0,ox),xb=Math.min(w,ox+300*s),ya=Math.max(0,oy),yb=Math.min(h,oy+100*s);
+    g.lineWidth=1/dpr;
+    [false,true].forEach(function(major){
+      g.strokeStyle=major?'rgba(80,80,80,.7)':'rgba(120,120,120,.4)';
+      g.beginPath();
+      for(var i=i0;i<=i1;i++){if((i%10===0)!==major)continue;var x=sn(ox+i*s);g.moveTo(x,ya);g.lineTo(x,yb)}
+      for(var j=j0;j<=j1;j++){if((j%10===0)!==major)continue;var y=sn(oy+j*s);g.moveTo(xa,y);g.lineTo(xb,y)}
+      g.stroke();
+    });
+  }
+  if(hv){
+    var sp=span(hv,picking?1:BS);
+    var px=ox+sp.x0*s,py=oy+sp.y0*s,rw=(sp.x1-sp.x0)*s,rh=(sp.y1-sp.y0)*s;
+    if(!picking&&!erase){g.globalAlpha=.45;g.fillStyle=color;g.fillRect(px,py,rw,rh);g.globalAlpha=1}
+    g.lineWidth=3;g.strokeStyle='rgba(255,255,255,.9)';g.strokeRect(px,py,rw,rh);
+    g.lineWidth=1.5;g.strokeStyle=erase?'#e63946':'#1d9bf0';g.strokeRect(px,py,rw,rh);
+  }
+}
+cv.addEventListener('pointermove',function(e){if(e.pointerType==='touch')return;hv=pos(e);sched()});
+cv.addEventListener('pointerleave',function(){hv=null;sched()});
+stage.addEventListener('scroll',sched);
+window.addEventListener('resize',sched);
+if(window.ResizeObserver)new ResizeObserver(sched).observe(stage);
+sched();
 
 // ---- timer / status
 function tick(){
@@ -277,7 +349,7 @@ $('dl').onclick=function(){
 };
 
 // ---- lobby
-function enter(){joined=true;$('gate').classList.add('hide');$('tools').style.display='flex';tick()}
+function enter(){joined=true;$('gate').classList.add('hide');$('tools').style.display='flex';tick();sched()}
 $('join').onclick=function(){
   var n=$('nm').value.trim().slice(0,20);
   if(!n){$('gmsg').textContent='Please enter a name.';return}
@@ -296,7 +368,7 @@ stream('/players',function(t,keys,err){
   if(err)return;
   players=t;board();loaded=true;
   var has=players[uid]&&players[uid].name;
-  if(joined&&!has){joined=false;$('tools').style.display='none';$('gate').classList.remove('hide');$('gform').classList.remove('hide');$('gmsg').textContent='The host removed your name. Pick a name to rejoin.'}
+  if(joined&&!has){joined=false;sched();$('tools').style.display='none';$('gate').classList.remove('hide');$('gform').classList.remove('hide');$('gmsg').textContent='The host removed your name. Pick a name to rejoin.'}
   else if(has&&!joined)enter();
   else if(gated&&!joined){gated=false;$('gmsg').textContent='Pick a name to join the lobby.';$('gform').classList.remove('hide')}
   tick();
