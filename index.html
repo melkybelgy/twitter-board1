@@ -218,30 +218,32 @@ function pos(e){var r=cv.getBoundingClientRect();return[Math.max(0,Math.min(299,
 function span(q,n){var off=Math.floor((n-1)/2),x0=q[0]-off,y0=q[1]-off;return{x0:Math.max(0,x0),y0:Math.max(0,y0),x1:Math.min(300,x0+n),y1:Math.min(100,y0+n)}}
 function cellKeys(q){var sp=span(q,BS),out=[];for(var y=sp.y0;y<sp.y1;y++)for(var x=sp.x0;x<sp.x1;x++)out.push(x+'_'+y);return out}
 function place(q){
-  if(!joined||!canDraw||!loaded)return;
-  var W='#ffffff',upd={},keys=[],delta=0,skipped=0;
+  if(!joined||!canDraw||!loaded){if(!(hostOn&&loaded))return}
+  var W='#ffffff',upd={},keys=[],cd={},skipped=0,au=!!hostOn;
+  var bump=function(u,n){if(u&&players[u])cd[u]=(cd[u]||0)+n};
   var bad=function(){noteEl.textContent=' Couldn’t save that. Check your connection.'};
   cellKeys(q).forEach(function(k){
     var cur=pix[k],cc=colorOf(cur);
     if(erase){
       if(!cur)return;
-      if(ownerOf(cur)!==uid){skipped++;return}
-      delete pix[k];drawKey(k);upd[k]=null;keys.push(k);if(cc!==W)delta--;
+      if(!hostOn&&ownerOf(cur)!==uid){skipped++;return}
+      delete pix[k];drawKey(k);upd[k]=null;keys.push(k);if(cc!==W)bump(ownerOf(cur),-1);
       return;
     }
-    if(cur&&cc!==W){skipped++;return}
+    if(cur&&cc!==W&&!hostOn){skipped++;return}
     if(cc===color)return;
-    var v={c:color,u:uid};pix[k]=v;drawKey(k);upd[k]=v;keys.push(k);if(color!==W)delta++;
+    if(cur&&cc!==W)bump(ownerOf(cur),-1);
+    var v={c:color,u:uid};pix[k]=v;drawKey(k);upd[k]=v;keys.push(k);if(color!==W)bump(uid,1);
   });
   if(skipped){
     if(BS===1)flash(erase?' You can only erase your own pixels.':' That pixel is already taken. Use the eraser on your own pixels.');
     else flash(erase?' Skipped '+skipped+' pixels that aren’t yours.':' Skipped '+skipped+' pixels that were already taken.');
   }
   if(!keys.length)return;
-  var one=function(k){return upd[k]===null?api('/pixels/'+k,'DELETE'):api('/pixels/'+k,'PUT',upd[k])};
-  var req=keys.length===1?one(keys[0]):api('/pixels','PATCH',upd).catch(function(){return Promise.all(keys.map(one))});
+  var one=function(k){return upd[k]===null?api('/pixels/'+k,'DELETE',undefined,au):api('/pixels/'+k,'PUT',upd[k],au)};
+  var req=keys.length===1?one(keys[0]):api('/pixels','PATCH',upd,au).catch(function(){return Promise.all(keys.map(one))});
   req.catch(bad);
-  if(delta)api('/players/'+uid+'/count','PUT',{'.sv':{increment:delta}}).catch(function(){});
+  Object.keys(cd).forEach(function(u){if(cd[u])api('/players/'+u+'/count','PUT',{'.sv':{increment:cd[u]}},au).catch(function(){})});
 }
 var dn=null,ptrs={},pinch=null;
 function pts(){return Object.keys(ptrs).map(function(k){return ptrs[k]})}
